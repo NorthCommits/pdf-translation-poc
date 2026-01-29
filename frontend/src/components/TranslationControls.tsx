@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { SUPPORTED_LANGUAGES } from '../types';
+import { SOURCE_LANGUAGES, TARGET_LANGUAGES } from '../types';
 
 interface TranslationControlsProps {
   onTranslate: (sourceLanguage: string, targetLanguage: string) => void;
@@ -20,15 +20,22 @@ export const TranslationControls: React.FC<TranslationControlsProps> = ({
   editedSegmentsCount = 0,
 }) => {
   const [sourceLanguage, setSourceLanguage] = useState('EN');
-  const [targetLanguage, setTargetLanguage] = useState('ES');
+  const [targetLanguage, setTargetLanguage] = useState('EN-US');
+
+  // Check if source and target are the same base language
+  const isSameLanguage = () => {
+    const sourceBase = sourceLanguage.split('-')[0];
+    const targetBase = targetLanguage.split('-')[0];
+    return sourceBase === targetBase;
+  };
 
   const handleTranslate = () => {
-    if (sourceLanguage !== targetLanguage) {
+    if (!isSameLanguage()) {
       onTranslate(sourceLanguage, targetLanguage);
     }
   };
 
-  const isButtonDisabled = disabled || isTranslating || sourceLanguage === targetLanguage;
+  const isButtonDisabled = disabled || isTranslating || isSameLanguage();
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6 space-y-4">
@@ -55,7 +62,7 @@ export const TranslationControls: React.FC<TranslationControlsProps> = ({
             disabled={disabled || isTranslating}
             className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
           >
-            {SUPPORTED_LANGUAGES.map((lang) => (
+            {SOURCE_LANGUAGES.map((lang) => (
               <option key={lang.code} value={lang.code}>
                 {lang.name}
               </option>
@@ -91,7 +98,7 @@ export const TranslationControls: React.FC<TranslationControlsProps> = ({
             disabled={disabled || isTranslating}
             className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
           >
-            {SUPPORTED_LANGUAGES.map((lang) => (
+            {TARGET_LANGUAGES.map((lang) => (
               <option key={lang.code} value={lang.code}>
                 {lang.name}
               </option>
@@ -101,7 +108,7 @@ export const TranslationControls: React.FC<TranslationControlsProps> = ({
       </div>
 
       {/* Warning if same language */}
-      {sourceLanguage === targetLanguage && (
+      {isSameLanguage() && (
         <div className="flex items-center space-x-2 text-amber-600 text-sm bg-amber-50 p-3 rounded">
           <svg className="h-5 w-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
             <path
@@ -173,10 +180,10 @@ export const TranslationControls: React.FC<TranslationControlsProps> = ({
             />
           </svg>
           <div>
-            <p className="font-medium">Layout Preservation</p>
+            <p className="font-medium">DeepL Document Translation</p>
             <p className="text-xs mt-1">
-              This system uses Apryse XLIFF Reflow technology to maintain the original PDF layout,
-              fonts, and formatting after translation.
+              This system uses DeepL's Document Translation API to automatically preserve the original PDF layout,
+              fonts, and formatting during translation.
             </p>
           </div>
         </div>

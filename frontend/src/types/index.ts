@@ -58,7 +58,8 @@ export interface Language {
   name: string;
 }
 
-export const SUPPORTED_LANGUAGES: Language[] = [
+// Source languages - EN is valid for source
+export const SOURCE_LANGUAGES: Language[] = [
   { code: 'EN', name: 'English' },
   { code: 'ES', name: 'Spanish' },
   { code: 'FR', name: 'French' },
@@ -73,3 +74,25 @@ export const SUPPORTED_LANGUAGES: Language[] = [
   { code: 'NL', name: 'Dutch' },
   { code: 'PL', name: 'Polish' },
 ];
+
+// Target languages - EN requires specific variants (EN-GB or EN-US)
+export const TARGET_LANGUAGES: Language[] = [
+  { code: 'EN-GB', name: 'English (British)' },
+  { code: 'EN-US', name: 'English (American)' },
+  { code: 'ES', name: 'Spanish' },
+  { code: 'FR', name: 'French' },
+  { code: 'DE', name: 'German' },
+  { code: 'IT', name: 'Italian' },
+  { code: 'PT-PT', name: 'Portuguese (European)' },
+  { code: 'PT-BR', name: 'Portuguese (Brazilian)' },
+  { code: 'ZH', name: 'Chinese (Simplified)' },
+  { code: 'JA', name: 'Japanese' },
+  { code: 'KO', name: 'Korean' },
+  { code: 'RU', name: 'Russian' },
+  { code: 'AR', name: 'Arabic' },
+  { code: 'NL', name: 'Dutch' },
+  { code: 'PL', name: 'Polish' },
+];
+
+// Backward compatibility - kept for any existing code
+export const SUPPORTED_LANGUAGES: Language[] = SOURCE_LANGUAGES;

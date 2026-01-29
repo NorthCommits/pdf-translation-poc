@@ -1,5 +1,9 @@
 import os
 from dotenv import load_dotenv
+import truststore
+
+# Inject truststore to use system certificates for SSL verification
+truststore.inject_into_ssl()
 
 # Load .env from project root (go up two levels from backend/core/)
 env_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')

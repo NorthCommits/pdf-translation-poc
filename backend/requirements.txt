@@ -4,3 +4,4 @@ python-multipart==0.0.6
 python-dotenv==1.0.0
 deepl==1.16.1
 pydantic==2.5.0
+truststore==0.9.1

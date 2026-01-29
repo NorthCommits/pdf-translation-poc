@@ -8,20 +8,14 @@ app = FastAPI(
     title="PDF Translation API with XLIFF Reflow",
     description="Translate PDFs while preserving layout using Apryse + DeepL",
     version="1.0.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc"
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 # CORS middleware for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # React (Create React App default)
-        "http://localhost:5173",  # Vite default
-        "http://localhost:5174",  # Vite alternate
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,6 +23,9 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(router, prefix="/api/v1", tags=["PDF Operations"])
+print(f"✓ Router included with {len(router.routes)} routes")
+for route in router.routes:
+    print(f"  - {route.methods} {route.path}")
 
 
 @app.get("/")
@@ -47,8 +44,8 @@ async def root():
             "Download Original & Translated PDFs"
         ],
         "documentation": {
-            "swagger": "/api/docs",
-            "redoc": "/api/redoc"
+            "swagger": "/docs",
+            "redoc": "/redoc"
         }
     }
 
@@ -74,15 +71,15 @@ if __name__ == "__main__":
     print("="*70)
     print(f"\n  🚀 Starting server...")
     print(f"  📁 Temp Directory: {settings.TEMP_DIR}")
-    print(f"  🔑 Apryse License: {'✓ Configured' if settings.APRYSE_LICENSE_KEY else '✗ Missing'}")
+    # print(f"  🔑 Apryse License: {'✓ Configured' if settings.APRYSE_LICENSE_KEY else '✗ Missing'}")
     print(f"  🔑 DeepL API Key: {'✓ Configured' if settings.DEEPL_API_KEY else '✗ Missing'}")
-    print(f"\n  📖 API Documentation: http://localhost:8000/api/docs")
-    print(f"  🏥 Health Check: http://localhost:8000/health")
+    print(f"\n  📖 API Documentation: http://localhost:8001/docs")
+    print(f"  🏥 Health Check: http://localhost:8001/health")
     print(f"\n" + "="*70 + "\n")
 
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000,
+        port=8001,
         log_level="info"
     )
