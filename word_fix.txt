@@ -1,0 +1,284 @@
+from docx import Document
+from docx.oxml import CT_P, CT_Tbl
+from docx.table import Table
+from docx.text.paragraph import Paragraph
+
+
+@classmethod
+def extract_document_content(cls, doc):
+    """
+    Extract all text content from a Word document in proper document order.
+    
+    Handles:
+    - Regular paragraphs
+    - Tables (with headers and data rows)
+    - Structured Document Tags (SDT) 
+    - Textboxes
+    - Headers and footers
+    
+    Returns structured content list with proper ordering.
+    """
+    structured_content = []
+    order_counter = 1
+    extracted_element_ids = set()  # Track all extracted elements by ID to avoid duplicates
+
+    # Helper: extract text from paragraph element (preserving words across runs)
+    def extract_paragraph_text_from_element(element):
+        """Extract clean text from a paragraph XML element."""
+        paragraphs = []
+        for p in element.findall(".//w:p", element.nsmap):
+            runs = []
+            for t in p.findall(".//w:t", element.nsmap):
+                if t.text:
+                    runs.append(t.text)
+            # Join all runs and normalize whitespace
+            paragraph_text = " ".join("".join(runs).split())
+            if paragraph_text:
+                paragraphs.append(paragraph_text)
+        return paragraphs
+
+    # Helper: extract content from a table cell
+    def extract_cell_content(cell):
+        """Extract all text content from a table cell."""
+        contents = []
+        
+        # Extract paragraph text from cell
+        contents.extend(extract_paragraph_text_from_element(cell._tc))
+        
+        # Note nested tables if present
+        for tbl in cell._tc.findall("./w:tbl", cell._tc.nsmap):
+            contents.append("[NESTED_TABLE]")
+        
+        return " ".join(" ".join(contents).split())
+
+    # Helper: process table structure
+    def process_table(table):
+        """Process table and return structured data with columns and values."""
+        nonlocal order_counter
+        
+        if not table.rows:
+            return None
+        
+        # Extract header row (first row is treated as header)
+        header_tr = table._tbl.tr_lst[0]
+        header_cells = header_tr.tc_lst
+        columns = []
+        
+        for idx, tc in enumerate(header_cells):
+            # Create temporary cell object for extraction
+            class FakeCell:
+                _tc = tc
+            
+            title = extract_cell_content(FakeCell())
+            columns.append({
+                "key": f"column-{idx + 1}",
+                "title": title if title else f"Column {idx + 1}"
+            })
+        
+        # Extract data rows (remaining rows after header)
+        values = []
+        for row_idx, tr in enumerate(table._tbl.tr_lst[1:], start=1):
+            row_data = {"id": str(row_idx)}
+            
+            for col_idx, tc in enumerate(tr.tc_lst):
+                if col_idx < len(columns):
+                    class FakeCell:
+                        _tc = tc
+                    row_data[columns[col_idx]["key"]] = extract_cell_content(FakeCell())
+            
+            values.append(row_data)
+        
+        result = {
+            "order": order_counter,
+            "type": "TABLE",
+            "content": {
+                "table": {
+                    "columns": columns,
+                    "values": values
+                }
+            }
+        }
+        order_counter += 1
+        return result
+
+    # Helper: iterate through body elements in document order
+    def iter_body_elements(parent):
+        """Iterate through direct children of document body."""
+        parent_elm = parent.element.body
+        
+        for child in parent_elm.iterchildren():
+            if isinstance(child, CT_P):
+                yield ('paragraph', Paragraph(child, parent), child)
+            elif isinstance(child, CT_Tbl):
+                yield ('table', Table(child, parent), child)
+            else:
+                # Other container elements (SDT, etc.)
+                yield ('other', None, child)
+
+    # Step 1: Extract headers and footers
+    for section in doc.sections:
+        # Process header
+        if section.header:
+            for paragraph in section.header.paragraphs:
+                text = paragraph.text.strip()
+                if text:
+                    structured_content.append({
+                        "order": order_counter,
+                        "type": "TEXT",
+                        "content": {"text": text}
+                    })
+                    order_counter += 1
+        
+        # Process footer
+        if section.footer:
+            for paragraph in section.footer.paragraphs:
+                text = paragraph.text.strip()
+                if text:
+                    structured_content.append({
+                        "order": order_counter,
+                        "type": "TEXT",
+                        "content": {"text": text}
+                    })
+                    order_counter += 1
+
+    # Step 2: Process main document body in document order
+    for element_type, element_obj, element_xml in iter_body_elements(doc):
+        
+        if element_type == 'paragraph':
+            # Extract regular paragraph
+            text = element_obj.text.strip()
+            if text:
+                structured_content.append({
+                    "order": order_counter,
+                    "type": "TEXT",
+                    "content": {"text": text}
+                })
+                order_counter += 1
+                extracted_element_ids.add(id(element_xml))
+        
+        elif element_type == 'table':
+            # Extract table
+            result = process_table(element_obj)
+            if result:
+                structured_content.append(result)
+                extracted_element_ids.add(id(element_xml))
+        
+        else:
+            # Handle container elements (SDT, content controls, etc.)
+            # These may contain paragraphs, tables, textboxes that aren't accessible via doc.paragraphs
+            
+            for child in element_xml.iter():
+                child_id = id(child)
+                
+                # Skip if already processed
+                if child_id in extracted_element_ids:
+                    continue
+                
+                # Extract paragraphs
+                if child.tag.endswith("}p"):
+                    try:
+                        # Try creating Paragraph object
+                        para = Paragraph(child, doc)
+                        text = para.text.strip()
+                        if text:
+                            structured_content.append({
+                                "order": order_counter,
+                                "type": "TEXT",
+                                "content": {"text": text}
+                            })
+                            order_counter += 1
+                            extracted_element_ids.add(child_id)
+                    except:
+                        # Fallback: extract text manually
+                        runs = []
+                        for t in child.findall(".//w:t", child.nsmap):
+                            if t.text:
+                                runs.append(t.text)
+                        text = " ".join("".join(runs).split())
+                        if text:
+                            structured_content.append({
+                                "order": order_counter,
+                                "type": "TEXT",
+                                "content": {"text": text}
+                            })
+                            order_counter += 1
+                            extracted_element_ids.add(child_id)
+                
+                # Extract tables
+                elif child.tag.endswith("}tbl"):
+                    try:
+                        table = Table(child, doc)
+                        result = process_table(table)
+                        if result:
+                            structured_content.append(result)
+                            extracted_element_ids.add(child_id)
+                    except:
+                        pass
+
+    return structured_content
+
+
+async def extract_data(self, body: FileExtractionRequest, file: File, conn):
+    """
+    Extract data from Word document and store in database.
+    """
+    try:
+        # Download file
+        local_file_path = self.fileHandler.download_file(url=file.s3_url)
+        
+        # Load document
+        doc = Document(local_file_path)
+        
+        # Extract content
+        contents = self.extract_document_content(doc=doc)
+        
+        # Prepare database records
+        extracted_texts = []
+        docx_responses = []
+        
+        for content in contents:
+            record = DocxExtractedText()
+            record.user_id = body.user_id
+            record.conversation_id = body.conversation_id
+            record.file_id = file.file_id
+            record.content_type = content["type"]
+            record.original_content = content["content"]
+            record.updated_content = content["content"]
+            record.sequence = content["order"]
+            extracted_texts.append(record)
+        
+        # Save to database
+        conn.add_all(extracted_texts)
+        conn.flush()
+        conn.commit()
+        
+        # Sort by sequence
+        extracted_texts = sorted(extracted_texts, key=lambda x: x.sequence)
+        
+        # Build response
+        for extracted_text in extracted_texts:
+            docx_responses.append(
+                DocxExtractionResponse(
+                    extraction_id=extracted_text.extraction_id,
+                    content_type=extracted_text.content_type,
+                    content=extracted_text.original_content,
+                    sequence=extracted_text.sequence
+                )
+            )
+        
+        extracted_contents = ExtractionResponse(
+            file_id=file.file_id,
+            file_type=file.file_type,
+            file_name=file.file_name,
+            original_file_url=self.fileHandler.generate_pre_signed_url(file.s3_url),
+            extractions=docx_responses
+        )
+        
+        return extracted_contents
+        
+    except HTTPException as httpException:
+        self.logger.error(httpException, exc_info=httpException)
+        raise httpException
+    except Exception as e:
+        self.logger.error(e, exc_info=e)
+        raise e
