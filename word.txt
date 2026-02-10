@@ -1,0 +1,180 @@
+from docx import Document
+from docx.oxml import CT_P, CT_Tbl
+from docx.table import Table
+from docx.text.paragraph import Paragraph
+
+
+@classmethod
+def extract_document_content(cls, doc):
+    structured_content = []
+    order_counter = 1
+
+    # Helper: extract paragraph-level text (avoids word split across runs)
+    def extract_paragraph_text_from_element(element):
+        paragraphs = []
+        for p in element.findall(".//w:p", element.nsmap):
+            runs = []
+            for t in p.findall(".//w:t", element.nsmap):
+                if t.text:
+                    runs.append(t.text)
+            paragraph_text = " ".join("".join(runs).split())
+            if paragraph_text:
+                paragraphs.append(paragraph_text)
+        return paragraphs
+
+    # Helper: extract textboxes recursively (paragraph-level)
+    def extract_textboxes_recursively(element):
+        texts = []
+        if element.tag.endswith("}txbxContent"):
+            texts.extend(extract_paragraph_text_from_element(element))
+        for child in element:
+            if child.tag.endswith("}txbxContent"):
+                texts.extend(extract_textboxes_recursively(child))
+        return texts
+
+    # Helper: extract content from a table cell
+    def extract_cell_content(cell):
+        contents = []
+        contents.extend(extract_paragraph_text_from_element(cell._tc))
+        for txbx in cell._tc.findall(".//w:txbxContent", cell._tc.nsmap):
+            contents.extend(extract_textboxes_recursively(txbx))
+        for tbl in cell._tc.findall("./w:tbl", cell._tc.nsmap):
+            contents.append("[NESTED_TABLE]")
+        return " ".join(" ".join(contents).split())
+
+    # Helper: process table (header + data rows, gridSpan-safe)
+    def process_table(table):
+        nonlocal order_counter
+        if not table.rows:
+            return None
+        header_tr = table._tbl.tr_lst[0]
+        header_cells = header_tr.tc_lst
+        columns = []
+        for idx, tc in enumerate(header_cells):
+            class FakeCell:
+                _tc = tc
+            title = extract_cell_content(FakeCell())
+            columns.append({
+                "key": f"column-{idx + 1}",
+                "title": title if title else f"Column {idx + 1}"
+            })
+        values = []
+        for row_idx, tr in enumerate(table._tbl.tr_lst[1:], start=1):
+            row_data = {"id": str(row_idx)}
+            for col_idx, tc in enumerate(tr.tc_lst):
+                if col_idx < len(columns):
+                    class FakeCell:
+                        _tc = tc
+                    row_data[columns[col_idx]["key"]] = extract_cell_content(FakeCell())
+            values.append(row_data)
+        result = {
+            "order": order_counter,
+            "type": "TABLE",
+            "content": {
+                "table": {
+                    "columns": columns,
+                    "values": values
+                }
+            }
+        }
+        order_counter += 1
+        return result
+
+    # Iterate document body blocks (paragraphs and tables in order)
+    def iter_block_items(parent):
+        parent_elm = parent.element.body
+        for child in parent_elm.iterchildren():
+            if isinstance(child, CT_P):
+                yield Paragraph(child, parent)
+            elif isinstance(child, CT_Tbl):
+                yield Table(child, parent)
+
+    # Headers and footers
+    for section in doc.sections:
+        for part in [section.header, section.footer]:
+            if part:
+                for paragraph in part.paragraphs:
+                    text = paragraph.text.strip()
+                    if text:
+                        structured_content.append({
+                            "order": order_counter,
+                            "type": "TEXT",
+                            "content": {"text": text}
+                        })
+                        order_counter += 1
+
+    # Main body
+    for block in iter_block_items(doc):
+        if isinstance(block, Paragraph):
+            text = block.text.strip()
+            if text:
+                structured_content.append({
+                    "order": order_counter,
+                    "type": "TEXT",
+                    "content": {"text": text}
+                })
+                order_counter += 1
+        elif isinstance(block, Table):
+            result = process_table(block)
+            if result:
+                structured_content.append(result)
+
+    # Floating / orphan textboxes
+    for element in doc.element.body.iter():
+        if element.tag.endswith("}txbxContent"):
+            texts = extract_textboxes_recursively(element)
+            for text in texts:
+                structured_content.append({
+                    "order": order_counter,
+                    "type": "TEXT",
+                    "content": {"text": text}
+                })
+                order_counter += 1
+
+    return structured_content
+
+
+async def extract_data(self, body: FileExtractionRequest, file: File, conn):
+    try:
+        local_file_path = self.fileHandler.download_file(url=file.s3_url)
+        doc = Document(local_file_path)
+        contents = self.extract_document_content(doc=doc)
+        extracted_texts = []
+        docx_responses = []
+        for content in contents:
+            record = DocxExtractedText()
+            record.user_id = body.user_id
+            record.conversation_id = body.conversation_id
+            record.file_id = file.file_id
+            record.content_type = content["type"]
+            record.original_content = content["content"]
+            record.updated_content = content["content"]
+            record.sequence = content["order"]
+            extracted_texts.append(record)
+        conn.add_all(extracted_texts)
+        conn.flush()
+        conn.commit()
+        extracted_texts = sorted(extracted_texts, key=lambda x: x.sequence)
+        for extracted_text in extracted_texts:
+            docx_responses.append(
+                DocxExtractionResponse(
+                    extraction_id=extracted_text.extraction_id,
+                    content_type=extracted_text.content_type,
+                    content=extracted_text.original_content,
+                    sequence=extracted_text.sequence
+                )
+            )
+        extracted_contents = ExtractionResponse(
+            file_id=file.file_id,
+            file_type=file.file_type,
+            file_name=file.file_name,
+            original_file_url=self.fileHandler.generate_pre_signed_url(file.s3_url),
+            extractions=docx_responses
+        )
+        return extracted_contents
+    except HTTPException as httpException:
+        self.logger.error(httpException, exc_info=httpException)
+        raise httpException
+    except Exception as e:
+        self.logger.error(e, exc_info=e)
+        raise e
